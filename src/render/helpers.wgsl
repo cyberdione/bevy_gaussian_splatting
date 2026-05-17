@@ -40,8 +40,14 @@ fn cov2d(
     let T = W * J;
 
     var cov = transpose(T) * transpose(Vrk) * T;
-    cov[0][0] += 0.3f;
-    cov[1][1] += 0.3f;
+    // FPVHERO PATCH (M8): upstream adds 0.3 px² low-pass dilation so every
+    // Gaussian is floored at ~1px diameter. On superspl.at PLYs (15M small
+    // Gaussians) that floor stops distant content from shrinking under
+    // perspective — distant walls/roads become a fuzzy 3px-disc field that
+    // looks "squished against a bounding box". Drop to a tiny epsilon so
+    // perspective wins for far Gaussians while keeping numerical safety.
+    cov[0][0] += 0.01f;
+    cov[1][1] += 0.01f;
 
     return vec3<f32>(cov[0][0], cov[0][1], cov[1][1]);
 }
