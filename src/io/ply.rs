@@ -47,17 +47,18 @@ impl PropertyAccess for Gaussian3d {
             (_, Property::Float(v)) if key.starts_with("f_rest_") => {
                 let i = key[7..].parse::<usize>().unwrap();
 
-                // interleaved
-                // if (i + 3) < SH_COEFF_COUNT {
-                //     self.spherical_harmonic.coefficients[i + 3] = v;
-                // }
-
-                // planar
-                let channel = i / SH_COEFF_COUNT_PER_CHANNEL;
-                let coefficient = if SH_COEFF_COUNT_PER_CHANNEL == 1 {
-                    1
+                // FPVHERO PATCH: Inria PLY stores f_rest_* in planar form
+                // (channel-major): N_PER_CH = SH_COEFF_COUNT_PER_CHANNEL - 1
+                // values per channel (DC is in f_dc_*, so the "rest" excludes
+                // band 0). Upstream divided by SH_COEFF_COUNT_PER_CHANNEL,
+                // putting f_rest_15 on channel 0 instead of channel 1 — so
+                // colours for scenes with degree-2+ SH (e.g. Inria-trained
+                // drjohnson, train, truck) rendered with channels scrambled.
+                let n_per_ch = SH_COEFF_COUNT_PER_CHANNEL - 1;
+                let (channel, coefficient) = if n_per_ch == 0 {
+                    (0usize, 1usize)
                 } else {
-                    (i % (SH_COEFF_COUNT_PER_CHANNEL - 1)) + 1
+                    (i / n_per_ch, (i % n_per_ch) + 1)
                 };
 
                 let interleaved_idx = coefficient * SH_CHANNELS + channel;
