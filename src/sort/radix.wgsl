@@ -89,9 +89,9 @@ fn radix_sort_a(
         let position = vec4<f32>(get_position(entry_index), 1.0);
         let transformed_position = (gaussian_uniforms.transform * position).xyz;
         let clip_space_pos = world_to_clip(transformed_position);
-        let diff = transformed_position - view.world_position;
-        let dist2 = dot(diff, diff);
-        let dist_bits = bitcast<u32>(dist2);
+        // Alpha compositing is ordered along the view axis, not radial distance.
+        let depth = -(view.view_from_world * vec4<f32>(transformed_position, 1.0)).z;
+        let dist_bits = bitcast<u32>(max(depth, 0.0));
         let key_distance = 0xFFFFFFFFu - dist_bits;
         if (in_frustum(clip_space_pos.xyz)) {
             key = key_distance;
