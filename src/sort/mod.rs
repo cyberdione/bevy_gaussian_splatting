@@ -264,9 +264,16 @@ fn auto_insert_sorted_entries<R: PlanarSync>(
             &mut images,
         ));
 
-        commands
-            .entity(entity)
-            .insert(SortedEntriesHandle(sorted_entries));
+        // Use a raw world command so we can check entity validity before
+        // inserting — the entity may be despawned by a state transition
+        // (e.g. Config → FlyingFpv) between when this system queues the
+        // command and when apply_deferred runs.
+        let sorted_handle = SortedEntriesHandle(sorted_entries);
+        commands.queue(move |world: &mut bevy::prelude::World| {
+            if let Ok(mut e) = world.get_entity_mut(entity) {
+                e.insert(sorted_handle);
+            }
+        });
     }
 }
 

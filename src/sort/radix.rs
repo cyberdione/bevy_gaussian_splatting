@@ -585,7 +585,7 @@ where
 
     fn run(
         &self,
-        _graph: &mut RenderGraphContext,
+        graph: &mut RenderGraphContext,
         render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), NodeRunError> {
@@ -598,8 +598,11 @@ where
         let gaussian_uniforms = world.resource::<GaussianUniformBindGroups>();
         let sort_buffers = world.resource::<RadixSortBuffers<R>>();
 
-        for (_camera, view_bind_group, view_uniform_offset, previous_view_uniform_offset) in
-            self.view_bind_group.iter_manual(world)
+        // This node runs inside each camera's Core3d subgraph. Sort only that
+        // view immediately before it draws; other cameras must not overwrite it.
+        let Some(view_entity) = graph.get_view_entity() else { return Ok(()); };
+        let Ok(view_data) = self.view_bind_group.get_manual(world, view_entity) else { return Ok(()); };
+        let (_camera, view_bind_group, view_uniform_offset, previous_view_uniform_offset) = view_data;
         {
             for (cloud_handle, cloud_bind_group, radix_bind_group) in
                 self.gaussian_clouds.iter_manual(world)

@@ -229,7 +229,7 @@ fn vs_points(
     var opacity = get_opacity(splat_index);
 
 #ifdef OPACITY_ADAPTIVE_RADIUS
-    let cutoff = sqrt(max(9.0 + 2.0 * log(opacity), 0.000001));
+    let cutoff = sqrt(clamp(2.0 * log(max(opacity, 0.000001) * 255.0), 0.000001, 9.0));
 #else
     let cutoff = 3.0;
 #endif
@@ -306,6 +306,8 @@ fn vs_points(
         );
         output.conic = conic;
         output.major_minor = bb.zw;
+    #else ifdef USE_OBB
+        output.major_minor = vec2<f32>(cutoff);
     #endif
 #endif
 
@@ -459,11 +461,11 @@ fn fs_main(input: GaussianVertexOutput) -> @location(0) vec4<f32> {
 #else ifdef GAUSSIAN_3D
     let d = -input.major_minor;
     let conic = input.conic;
-    let power = -0.5 * (conic.x * d.x * d.x + conic.z * d.y * d.y) + conic.y * d.x * d.y;
+    let power = -0.5 * (conic.x * d.x * d.x + conic.z * d.y * d.y) - conic.y * d.x * d.y;
 #else ifdef GAUSSIAN_4D
     let d = -input.major_minor;
     let conic = input.conic;
-    let power = -0.5 * (conic.x * d.x * d.x + conic.z * d.y * d.y) + conic.y * d.x * d.y;
+    let power = -0.5 * (conic.x * d.x * d.x + conic.z * d.y * d.y) - conic.y * d.x * d.y;
 #endif
 
     if (power > 0.0) {
@@ -472,11 +474,14 @@ fn fs_main(input: GaussianVertexOutput) -> @location(0) vec4<f32> {
 #endif
 
 #ifdef USE_OBB
-    let sigma = 1.0 / 3.0;
-    let sigma_squared = 2.0 * sigma * sigma;
-    let distance_squared = dot(input.uv, input.uv);
-
-    let power = -distance_squared / sigma_squared;
+    // The quad uses the opacity-adaptive cutoff, not always three sigma.
+#ifdef GAUSSIAN_2D
+    let gaussian_uv = input.uv * 3.0;
+#else
+    let gaussian_uv = input.uv * input.major_minor;
+#endif
+    let distance_squared = dot(gaussian_uv, gaussian_uv);
+    let power = -0.5 * distance_squared;
 
     if (distance_squared > 3.0 * 3.0) {
         discard;
@@ -495,6 +500,7 @@ fn fs_main(input: GaussianVertexOutput) -> @location(0) vec4<f32> {
 #endif
 
     let alpha = min(exp(power) * input.color.a, 0.999);
+    if alpha < 1.0 / 255.0 { discard; }
 
     // TODO: round alpha to terminate depth test?
 

@@ -1478,6 +1478,7 @@ where
         Read<R::PlanarTypeHandle>,
         Read<PlanarStorageBindGroup<R>>,
         Read<SortBindGroup>,
+        Read<CloudSettings>,
     );
 
     #[inline]
@@ -1488,6 +1489,7 @@ where
             &'w R::PlanarTypeHandle,
             &'w PlanarStorageBindGroup<R>,
             &'w SortBindGroup,
+            &'w CloudSettings,
         )>,
         gaussian_clouds: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
@@ -1497,7 +1499,7 @@ where
         #[cfg(all(feature = "buffer_texture", not(feature = "buffer_storage")))]
         let _ = view;
 
-        let (handle, planar_bind_groups, sort_bind_groups) =
+        let (handle, planar_bind_groups, sort_bind_groups, settings) =
             entity.expect("gaussian cloud entity not found");
 
         let gpu_gaussian_cloud = match gaussian_clouds.into_inner().get(handle.handle()) {
@@ -1518,9 +1520,7 @@ where
             pass.set_bind_group(
                 3,
                 &sort_bind_groups.sorted_bind_group,
-                &[view.camera_index as u32
-                    * std::mem::size_of::<SortEntry>() as u32
-                    * gpu_gaussian_cloud.len() as u32],
+                &[sorted_draw_offset(&settings.sort_mode, view.camera_index, gpu_gaussian_cloud.len())],
             );
         }
 
@@ -1537,4 +1537,12 @@ where
 
         RenderCommandResult::Success
     }
+}
+
+// Radix uses one scratch/output slice, refreshed in each camera's render graph.
+// CPU sorting retains one slice per camera.
+fn sorted_draw_offset(mode: &crate::sort::SortMode, camera_index: usize, count: usize) -> u32 {
+    #[cfg(all(feature = "sort_radix", not(feature = "buffer_texture")))]
+    if *mode == crate::sort::SortMode::Radix { return 0; }
+    (camera_index * std::mem::size_of::<SortEntry>() * count) as u32
 }

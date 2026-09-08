@@ -18,13 +18,17 @@ fn cov2d(
     var t = view.view_from_world * vec4<f32>(position, 1.0);
 
     let focal = vec2<f32>(
-        view.clip_from_view[0].x * view.viewport.z,
-        view.clip_from_view[1].y * view.viewport.w,
+        view.clip_from_view[0].x * view.viewport.z * 0.5,
+        view.clip_from_view[1].y * view.viewport.w * 0.5,
     );
 
+    // Limit perspective derivatives for splats whose footprint crosses an edge.
+    let limit = 1.3 / vec2<f32>(view.clip_from_view[0].x, view.clip_from_view[1].y);
+    t.x = clamp(t.x / t.z, -limit.x, limit.x) * t.z;
+    t.y = clamp(t.y / t.z, -limit.y, limit.y) * t.z;
     let s = 1.0 / (t.z * t.z);
     let J = mat3x3(
-        focal.x / t.z, 0.0, -(focal.x * t.x) * s,
+        -focal.x / t.z, 0.0, (focal.x * t.x) * s,
         0.0, -focal.y / t.z, (focal.y * t.y) * s,
         0.0, 0.0, 0.0,
     );
@@ -40,14 +44,9 @@ fn cov2d(
     let T = W * J;
 
     var cov = transpose(T) * transpose(Vrk) * T;
-    // FPVHERO PATCH (M8): upstream adds 0.3 px² low-pass dilation so every
-    // Gaussian is floored at ~1px diameter. On superspl.at PLYs (15M small
-    // Gaussians) that floor stops distant content from shrinking under
-    // perspective — distant walls/roads become a fuzzy 3px-disc field that
-    // looks "squished against a bounding box". Drop to a tiny epsilon so
-    // perspective wins for far Gaussians while keeping numerical safety.
-    cov[0][0] += 0.01f;
-    cov[1][1] += 0.01f;
+    // Covariance is measured in pixels; apply the standard pixel low-pass.
+    cov[0][0] += 0.3;
+    cov[1][1] += 0.3;
 
     return vec3<f32>(cov[0][0], cov[0][1], cov[1][1]);
 }
@@ -75,7 +74,7 @@ fn get_bounding_box_clip(
 #ifdef USE_AABB
     let radius_px = cutoff * max(x_axis_length, y_axis_length);
     let radius_ndc = vec2<f32>(
-        radius_px / view.viewport.zw,
+        2.0 * radius_px / view.viewport.zw,
     );
 
     return vec4<f32>(
@@ -96,10 +95,13 @@ fn get_bounding_box_clip(
         minor_radius,
     );
 
-    let eigvec1 = normalize(vec2<f32>(
-        -cov2d.y,
-        lambda1 - cov2d.x,
-    ));
+    // A diagonal/circular covariance has no unique off-diagonal eigenvector.
+    var eigvec1 = vec2<f32>(1.0, 0.0);
+    if abs(cov2d.y) > 0.000001 {
+        eigvec1 = normalize(vec2<f32>(cov2d.y, lambda1 - cov2d.x));
+    } else if cov2d.z > cov2d.x {
+        eigvec1 = vec2<f32>(0.0, 1.0);
+    }
     let eigvec2 = vec2<f32>(
         eigvec1.y,
         -eigvec1.x
@@ -115,7 +117,7 @@ fn get_bounding_box_clip(
     let scaled_vertex = direction * bounds;
     let rotated_vertex = scaled_vertex * rotation_matrix;
 
-    let scaling_factor = 1.0 / view.viewport.zw;
+    let scaling_factor = 2.0 / view.viewport.zw;
     let ndc_vertex = rotated_vertex * scaling_factor;
 
     return vec4<f32>(
